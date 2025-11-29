@@ -1,65 +1,152 @@
 import os
 import logging
-from flask import Flask, request
-from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application
-
-# Logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+import json
+import requests
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
 # TOKEN
 TOKEN = os.environ.get("TOKEN")
 if not TOKEN:
-    raise RuntimeError("TOKEN not set!")
+    raise RuntimeError("❌ TOKEN environment variable not set!")
 
-# Application v20 (KHÔNG DÙNG Updater nữa)
-application = Application.builder().token(TOKEN).build()
+BOT_URL = f"https://api.telegram.org/bot{TOKEN}"
 
-# /start handler
-async def start(update: Update, context):
-    keyboard = [[InlineKeyboardButton("🎮 Chơi Tiến Lên Miền Nam", web_app={"url": "https://tienlen-miniapp.netlify.app"})]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "🎉 **CHÀO BẠN!**\n\nBấm nút để chơi Tiến Lên Miền Nam ngay!",
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
-    )
+@app.route('/')
+def home():
+    return '''
+    <!DOCTYPE html>
+    <html>
+    <head><title>🚀 Tiến Lên Bot V2</title></head>
+    <body style="font-family: Arial; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+        <h1>🚀 TIẾN LÊN BOT V2 - LIVE!</h1>
+        <p><strong>Service:</strong> tienlen-bot-20251129</p>
+        <p><strong>Status:</strong> ✅ Ready!</p>
+        <p><a href="/health" style="color: white; padding: 10px 20px; background: #48bb78; text-decoration: none; border-radius: 5px;">🔍 Health</a>
+        <a href="/setwebhook" style="color: white; padding: 10px 20px; background: #ed8936; text-decoration: none; border-radius: 5px; margin-left: 10px;">🔗 Webhook</a></p>
+    </body>
+    </html>
+    '''
 
-# Handler khác
-async def unknown(update: Update, context):
-    await update.message.reply_text("Gõ /start để chơi nhé!")
+@app.route('/health')
+def health():
+    return jsonify({
+        'status': 'OK',
+        'service': 'tienlen-bot-20251129',
+        'bot': 'ready',
+        'method': 'HTTP API'
+    })
 
-# Add handlers
-application.add_handler(CommandHandler("start", start))
-application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, unknown))
-
-@app.route("/")
-def index():
-    return "<h1>🚀 TIẾN LÊN BOT V2 LIVE!</h1><p><a href='/setwebhook'>Set Webhook</a></p>"
-
-@app.route("/setwebhook")
+@app.route('/setwebhook', methods=['GET'])
 def set_webhook():
-    url = f"https://{request.host}/webhook"
+    webhook_url = f"https://{request.host}/webhook"
+    
     try:
-        application.bot.set_webhook(url=url)
-        return f"<h1>✅ WEBHOOK SET: {url}</h1>"
+        # Set webhook
+        response = requests.post(f"{BOT_URL}/setWebhook", data={
+            'url': webhook_url
+        })
+        data = response.json()
+        
+        if data['ok']:
+            # Get webhook info
+            info_response = requests.get(f"{BOT_URL}/getWebhookInfo")
+            info = info_response.json()
+            
+            return f'''
+            <!DOCTYPE html>
+            <html><head><title>Webhook Success</title></head>
+            <body style="font-family: Arial; text-align: center; padding: 50px; background: linear-gradient(135deg, #48bb78, #38a169); color: white;">
+                <h1>✅ WEBHOOK CÀI ĐẶT THÀNH CÔNG!</h1>
+                <div style="background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px; margin: 20px 0;">
+                    <p><strong>🔗 Webhook URL:</strong></p>
+                    <code style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 5px; display: block; word-break: break-all;">
+                        {webhook_url}
+                    </code>
+                    <p><strong>📊 Pending updates:</strong> {info['result']['pending_update_count']}</p>
+                </div>
+                <p><strong>🎉 Bot đã sẵn sàng! Thử gõ <code>/start</code> trong Telegram ngay!</strong></p>
+                <a href="/" style="color: white; text-decoration: none; padding: 12px 24px; background: rgba(255,255,255,0.2); border-radius: 25px;">🏠 Trang chủ</a>
+            </body></html>
+            '''
+        else:
+            return f'<h1>❌ Set webhook failed: {data}</h1>'
+            
     except Exception as e:
-        return f"<h1>❌ ERROR: {e}</h1>"
+        return f'<h1>❌ Lỗi: {str(e)}</h1><a href="/">Trang chủ</a>'
 
-@app.route("/webhook", methods=["POST"])
+@app.route('/webhook', methods=['POST'])
 def webhook():
     try:
-        update = Update.de_json(request.get_json(force=True), application.bot)
-        if update:
-            asyncio.run(application.process_update(update))
-        return "OK", 200
+        # Nhận update từ Telegram
+        update = request.get_json(force=True)
+        
+        if not update:
+            return 'OK', 200
+        
+        # Xử lý message
+        if 'message' in update:
+            message = update['message']
+            chat_id = message['chat']['id']
+            text = message.get('text', '')
+            
+            if text == '/start':
+                # Gửi message với nút chơi game
+                send_message(chat_id, 
+                    "🎉 **CHÀO BẠN ĐẾN VỚI TIẾN LÊN BOT!**\n\n"
+                    "👆 **Bấm nút bên dưới** để **chơi Tiến Lên Miền Nam** ngay!\n\n"
+                    "✨ **Tính năng:**\n"
+                    "• 🎯 Game mượt mà\n"
+                    "• 👥 Chơi với bạn bè\n"
+                    "• 🚫 Không quảng cáo",
+                    reply_markup={
+                        "inline_keyboard": [[
+                            {
+                                "text": "🎮 Chơi Tiến Lên Miền Nam",
+                                "web_app": {"url": "https://tienlen-miniapp.netlify.app"}
+                            }
+                        ]]
+                    }
+                )
+            
+            elif text == '/help':
+                send_message(chat_id,
+                    "🆘 **HƯỚNG DẪN:**\n\n"
+                    "📋 **Lệnh:**\n"
+                    "• `/start` - Bắt đầu chơi\n"
+                    "• `/help` - Hướng dẫn này"
+                )
+            
+            else:
+                send_message(chat_id,
+                    "🎮 **Gõ `/start` để bắt đầu chơi!**"
+                )
+        
+        return 'OK', 200
+        
     except Exception as e:
-        logger.error(f"Error: {e}")
-        return "ERROR", 500
+        logging.error(f"Webhook error: {e}")
+        return 'ERROR', 500
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+def send_message(chat_id, text, reply_markup=None):
+    """Gửi tin nhắn qua Telegram API"""
+    data = {
+        'chat_id': chat_id,
+        'text': text,
+        'parse_mode': 'Markdown'
+    }
+    
+    if reply_markup:
+        data['reply_markup'] = json.dumps(reply_markup)
+    
+    try:
+        response = requests.post(f"{BOT_URL}/sendMessage", data=data)
+        return response.json()
+    except Exception as e:
+        logging.error(f"Send message error: {e}")
+        return None
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port, debug=False)
